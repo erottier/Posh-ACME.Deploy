@@ -9,6 +9,7 @@ function Set-IISCertificate {
         [Parameter(Position=2,ValueFromPipelineByPropertyName)]
         [securestring]$PfxPass,
         [string]$SiteName='Default Web Site',
+        [bool]$copySiteBindingInfo=$false,
         [uint32]$Port=443,
         [string]$IPAddress='*',
         [string[]]$HostHeader=@(''),
@@ -101,13 +102,28 @@ function Set-IISCertificate {
             throw "Site $SiteName not found."
         }
 
+        # TODO: Refactor this into the foreach below.
+        # Since Get-IISSiteBindingInfo is not working right (bugged?) with multiple bindings (if edited before a server restart?), I've opted to use Get-WebBinding.
+        if ($copySiteBindingInfo -eq $true) {
+            # TODO: check if there is a need for a custom object \ aka if this works.
+            $allBindings = Get-Website $SiteName | Get-WebBinding -Protocol https
+            $HostHeader = 0..($allBindings.Count - 1) | ForEach-Object {"$_"}
+        }
+
         # multiple host headers require multiple bindings
         [string[]]$oldThumbPrints = foreach ($hh in $HostHeader) {
 
-            # check for an existing site binding
-            $bindMatch = "$($IPAddress):$($Port):$($hh)"
-            $binding = (Get-IISSiteBinding -Name $SiteName -Protocol 'https' -WarningAction 'Ignore') | Where-Object {
-                $_.bindingInformation -eq $bindMatch
+            if ($copySiteBindingInfo -eq $false) {
+                # check for an existing site binding
+                $bindMatch = "$($IPAddress):$($Port):$($hh)"
+                $binding = (Get-IISSiteBinding -Name $SiteName -Protocol 'https' -WarningAction 'Ignore') | Where-Object {
+                    $_.bindingInformation -eq $bindMatch
+                }
+            } else {
+                # Copy the complete binding object, per bind.
+                # TODO: refactor this into the function instead of going through each hostheader.
+                $binding = $allBindings[[int]$hh]
+                $bindMatch = $binding.bindingInformation
             }
 
             # The IISAdministration module combines the creation of web binding and SSL binding
